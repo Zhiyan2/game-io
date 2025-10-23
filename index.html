@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tank Battle</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background: #cdcdcd;
+        }
+        #gameCanvas {
+            display: block;
+            background: #cdcdcd;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px black;
+            z-index: 10;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #skinSelector {
+            position: absolute;
+            top: 100px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+        .skinOption {
+            width: 40px;
+            height: 40px;
+            margin: 5px;
+            border: 3px solid white;
+            cursor: pointer;
+            display: inline-block;
+            border-radius: 50%;
+        }
+        .skinOption:hover {
+            border-color: yellow;
+        }
+        #minimap {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            border: 2px solid white;
+            background: rgba(200, 200, 200, 0.5);
+            z-index: 10;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            display: none;
+            z-index: 20;
+        }
+        #pauseMenu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            display: none;
+            z-index: 20;
+        }
+        h2 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <canvas id="minimap" width="150" height="150"></canvas>
+    
+    <div id="ui">
+        <div>Очки: <span id="score">0</span></div>
+        <div>Уровень: <span id="level">1</span></div>
+        <div>HP: <span id="health">100</span></div>
+    </div>
+    
+    <div id="controls">
+        <button id="pauseBtn">Пауза</button>
+        <button id="soundBtn">Звук: ВКЛ</button>
+    </div>
+    
+    <div id="skinSelector">
+        <div style="color: white; margin-bottom: 10px;">Скин:</div>
+        <div class="skinOption" style="background: #00B2E1;" data-color="#00B2E1"></div>
+        <div class="skinOption" style="background: #F14E54;" data-color="#F14E54"></div>
+        <div class="skinOption" style="background: #00E16E;" data-color="#00E16E"></div>
+        <div class="skinOption" style="background: #BF7FF5;" data-color="#BF7FF5"></div>
+        <div class="skinOption" style="background: #FFE869;" data-color="#FFE869"></div>
+    </div>
+    
+    <div id="gameOver">
+        <h2>Игра окончена!</h2>
+        <p>Ваши очки: <span id="finalScore">0</span></p>
+        <p>Уровень: <span id="finalLevel">1</span></p>
+        <button id="restartBtn">Начать заново</button>
+    </div>
+    
+    <div id="pauseMenu">
+        <h2>Пауза</h2>
+        <p>Управление: WASD или стрелки</p>
+        <p>Стрельба: автоматическая по направлению мыши</p>
+        <button id="resumeBtn">Продолжить</button>
+        <button id="restartBtn2">Рестарт</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const minimap = document.getElementById('minimap');
+        const minimapCtx = minimap.getContext('2d');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        let soundEnabled = true;
+        let isPaused = false;
+        let gameStarted = true;
+        
+        // Создаем простые звуки
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(frequency, duration, type = 'sine') {
+            if (!soundEnabled) return;
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+            
+            gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+        
+        // Игровой мир
+        const world = {
+            width: 3000,
+            height: 3000
+        };
+        
+        // Игрок
+        const player = {
+            x: world.width / 2,
+            y: world.height / 2,
+            size: 25,
+            color: '#00B2E1',
+            speed: 3,
+            health: 100,
+            maxHealth: 100,
+            score: 0,
+            level: 1,
+            exp: 0,
+            expToLevel: 100,
+            angle: 0,
+            cannonLength: 35,
+            cannonWidth: 15,
+            shootCooldown: 0,
+            shootRate: 15
+        };
+        
+        // Массивы
+        const bullets = [];
+        const bots = [];
+        const particles = [];
+        
+        // Ввод
+        const keys = {};
+        const mouse = { x: 0, y: 0 };
+        
+        // Камера
+        const camera = {
+            x: player.x - canvas.width / 2,
+            y: player.y - canvas.height / 2
+        };
+        
+        // Создание ботов
+        function spawnBot() {
+            const bot = {
+                x: Math.random() * world.width,
+                y: Math.random() * world.height,
+                size: 20 + Math.random() * 15,
+                color: '#F14E54',
+                health: 50,
+                maxHealth: 50,
+                speed: 1 + Math.random() * 1.5,
+                angle: Math.random() * Math.PI * 2,
+                cannonLength: 30,
+                cannonWidth: 12,
+                shootCooldown: 0,
+                shootRate: 30 + Math.random() * 30,
+                targetX: 0,
+                targetY: 0,
+                changeTargetTimer: 0
+            };
+            bots.push(bot);
+        }
+        
+        // Начальные боты
+        for (let i = 0; i < 15; i++) {
+            spawnBot();
+        }
+        
+        // Пуля
+        function createBullet(x, y, angle, owner) {
+            bullets.push({
+                x, y, angle,
+                speed: 8,
+                size: 8,
+                damage: 25,
+                owner,
+                lifetime: 120
+            });
+            playSound(300, 0.05, 'square');
+        }
+        
+        // Частицы
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    size: Math.random() * 5 + 2,
+                    color,
+                    life: 30
+                });
+            }
+        }
+        
+        // Отрисовка танка
+        function drawTank(tank, isPlayer = false) {
+            ctx.save();
+            ctx.translate(tank.x - camera.x, tank.y - camera.y);
+            
+            // Пушка
+            ctx.save();
+            ctx.rotate(tank.angle);
+            ctx.fillStyle = isPlayer ? tank.color : '#C0504D';
+            ctx.fillRect(0, -tank.cannonWidth / 2, tank.cannonLength, tank.cannonWidth);
+            ctx.restore();
+            
+            // Тело
+            ctx.fillStyle = tank.color;
+            ctx.beginPath();
+            ctx.arc(0, 0, tank.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = isPlayer ? '#555' : '#000';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            // HP бар
+            if (tank.health < tank.maxHealth) {
+                const barWidth = tank.size * 2;
+                const barHeight = 5;
+                const barY = -tank.size - 10;
+                
+                ctx.fillStyle = '#333';
+                ctx.fillRect(-barWidth / 2, barY, barWidth, barHeight);
+                
+                ctx.fillStyle = '#0F0';
+                const healthWidth = (tank.health / tank.maxHealth) * barWidth;
+                ctx.fillRect(-barWidth / 2, barY, healthWidth, barHeight);
+            }
+            
+            ctx.restore();
+        }
+        
+        // Обновление игрока
+        function updatePlayer() {
+            if (keys['w'] || keys['ArrowUp']) player.y -= player.speed;
+            if (keys['s'] || keys['ArrowDown']) player.y += player.speed;
+            if (keys['a'] || keys['ArrowLeft']) player.x -= player.speed;
+            if (keys['d'] || keys['ArrowRight']) player.x += player.speed;
+            
+            player.x = Math.max(player.size, Math.min(world.width - player.size, player.x));
+            player.y = Math.max(player.size, Math.min(world.height - player.size, player.y));
+            
+            const worldMouseX = mouse.x + camera.x;
+            const worldMouseY = mouse.y + camera.y;
+            player.angle = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
+            
+            if (player.shootCooldown > 0) {
+                player.shootCooldown--;
+            } else {
+                createBullet(
+                    player.x + Math.cos(player.angle) * player.cannonLength,
+                    player.y + Math.sin(player.angle) * player.cannonLength,
+                    player.angle,
+                    'player'
+                );
+                player.shootCooldown = player.shootRate;
+            }
+            
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+        }
+        
+        // Обновление ботов
+        function updateBots() {
+            bots.forEach((bot, index) => {
+                bot.changeTargetTimer--;
+                if (bot.changeTargetTimer <= 0) {
+                    const distToPlayer = Math.hypot(player.x - bot.x, player.y - bot.y);
+                    if (distToPlayer < 400 && Math.random() > 0.5) {
+                        bot.targetX = player.x;
+                        bot.targetY = player.y;
+                    } else {
+                        bot.targetX = Math.random() * world.width;
+                        bot.targetY = Math.random() * world.height;
+                    }
+                    bot.changeTargetTimer = 60 + Math.random() * 120;
+                }
+                
+                const dx = bot.targetX - bot.x;
+                const dy = bot.targetY - bot.y;
+                const dist = Math.hypot(dx, dy);
+                
+                if (dist > 50) {
+                    bot.x += (dx / dist) * bot.speed;
+                    bot.y += (dy / dist) * bot.speed;
+                }
+                
+                bot.x = Math.max(bot.size, Math.min(world.width - bot.size, bot.x));
+                bot.y = Math.max(bot.size, Math.min(world.height - bot.size, bot.y));
+                
+                const angleToPlayer = Math.atan2(player.y - bot.y, player.x - bot.x);
+                bot.angle = angleToPlayer;
+                
+                if (bot.shootCooldown > 0) {
+                    bot.shootCooldown--;
+                } else if (Math.hypot(player.x - bot.x, player.y - bot.y) < 500) {
+                    createBullet(
+                        bot.x + Math.cos(bot.angle) * bot.cannonLength,
+                        bot.y + Math.sin(bot.angle) * bot.cannonLength,
+                        bot.angle,
+                        'bot'
+                    );
+                    bot.shootCooldown = bot.shootRate;
+                }
+            });
+        }
+        
+        // Обновление пуль
+        function updateBullets() {
+            bullets.forEach((bullet, index) => {
+                bullet.x += Math.cos(bullet.angle) * bullet.speed;
+                bullet.y += Math.sin(bullet.angle) * bullet.speed;
+                bullet.lifetime--;
+                
+                if (bullet.lifetime <= 0 || bullet.x < 0 || bullet.x > world.width || 
+                    bullet.y < 0 || bullet.y > world.height) {
+                    bullets.splice(index, 1);
+                    return;
+                }
+                
+                if (bullet.owner === 'player') {
+                    bots.forEach((bot, botIndex) => {
+                        if (Math.hypot(bullet.x - bot.x, bullet.y - bot.y) < bot.size) {
+                            bot.health -= bullet.damage;
+                            bullets.splice(index, 1);
+                            createParticles(bot.x, bot.y, bot.color);
+                            playSound(150, 0.1, 'sawtooth');
+                            
+                            if (bot.health <= 0) {
+                                player.score += 100;
+                                player.exp += 50;
+                                bots.splice(botIndex, 1);
+                                spawnBot();
+                                playSound(200, 0.2, 'sine');
+                                
+                                if (player.exp >= player.expToLevel) {
+                                    player.level++;
+                                    player.exp = 0;
+                                    player.expToLevel *= 1.5;
+                                    player.maxHealth += 20;
+                                    player.health = player.maxHealth;
+                                    player.shootRate = Math.max(5, player.shootRate - 1);
+                                    playSound(600, 0.3, 'sine');
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    if (Math.hypot(bullet.x - player.x, bullet.y - player.y) < player.size) {
+                        player.health -= bullet.damage;
+                        bullets.splice(index, 1);
+                        createParticles(player.x, player.y, player.color);
+                        playSound(100, 0.15, 'sawtooth');
+                        
+                        if (player.health <= 0) {
+                            gameOver();
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Обновление частиц
+        function updateParticles() {
+            particles.forEach((p, index) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vx *= 0.95;
+                p.vy *= 0.95;
+                p.life--;
+                if (p.life <= 0) particles.splice(index, 1);
+            });
+        }
+        
+        // Отрисовка
+        function draw() {
+            ctx.fillStyle = '#cdcdcd';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Сетка
+            ctx.strokeStyle = '#aaa';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            const startX = Math.floor(camera.x / gridSize) * gridSize;
+            const startY = Math.floor(camera.y / gridSize) * gridSize;
+            
+            for (let x = startX; x < camera.x + canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x - camera.x, 0);
+                ctx.lineTo(x - camera.x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = startY; y < camera.y + canvas.height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y - camera.y);
+                ctx.lineTo(canvas.width, y - camera.y);
+                ctx.stroke();
+            }
+            
+            // Частицы
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life / 30;
+                ctx.fillRect(p.x - camera.x, p.y - camera.y, p.size, p.size);
+            });
+            ctx.globalAlpha = 1;
+            
+            // Пули
+            bullets.forEach(bullet => {
+                ctx.fillStyle = bullet.owner === 'player' ? '#00B2E1' : '#F14E54';
+                ctx.beginPath();
+                ctx.arc(bullet.x - camera.x, bullet.y - camera.y, bullet.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Боты
+            bots.forEach(bot => drawTank(bot, false));
+            
+            // Игрок
+            drawTank(player, true);
+            
+            // Миникарта
+            minimapCtx.fillStyle = '#999';
+            minimapCtx.fillRect(0, 0, 150, 150);
+            
+            const scale = 150 / world.width;
+            
+            minimapCtx.fillStyle = player.color;
+            minimapCtx.fillRect(player.x * scale - 2, player.y * scale - 2, 4, 4);
+            
+            minimapCtx.fillStyle = '#F14E54';
+            bots.forEach(bot => {
+                minimapCtx.fillRect(bot.x * scale - 1, bot.y * scale - 1, 2, 2);
+            });
+            
+            // UI
+            document.getElementById('score').textContent = player.score;
+            document.getElementById('level').textContent = player.level;
+            document.getElementById('health').textContent = Math.max(0, Math.floor(player.health));
+        }
+        
+        // Игровой цикл
+        function gameLoop() {
+            if (!isPaused && gameStarted) {
+                updatePlayer();
+                updateBots();
+                updateBullets();
+                updateParticles();
+            }
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Геймовер
+        function gameOver() {
+            gameStarted = false;
+            document.getElementById('finalScore').textContent = player.score;
+            document.getElementById('finalLevel').textContent = player.level;
+            document.getElementById('gameOver').style.display = 'block';
+            playSound(100, 0.5, 'sawtooth');
+        }
+        
+        // Рестарт
+        function restart() {
+            player.x = world.width / 2;
+            player.y = world.height / 2;
+            player.health = 100;
+            player.maxHealth = 100;
+            player.score = 0;
+            player.level = 1;
+            player.exp = 0;
+            player.expToLevel = 100;
+            player.shootRate = 15;
+            bullets.length = 0;
+            bots.length = 0;
+            particles.length = 0;
+            for (let i = 0; i < 15; i++) spawnBot();
+            gameStarted = true;
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('pauseMenu').style.display = 'none';
+            isPaused = false;
+        }
+        
+        // События
+        window.addEventListener('keydown', e => keys[e.key] = true);
+        window.addEventListener('keyup', e => keys[e.key] = false);
+        window.addEventListener('mousemove', e => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+        
+        document.getElementById('pauseBtn').addEventListener('click', () => {
+            isPaused = !isPaused;
+            document.getElementById('pauseMenu').style.display = isPaused ? 'block' : 'none';
+        });
+        
+        document.getElementById('resumeBtn').addEventListener('click', () => {
+            isPaused = false;
+            document.getElementById('pauseMenu').style.display = 'none';
+        });
+        
+        document.getElementById('soundBtn').addEventListener('click', function() {
+            soundEnabled = !soundEnabled;
+            this.textContent = soundEnabled ? 'Звук: ВКЛ' : 'Звук: ВЫКЛ';
+        });
+        
+        document.getElementById('restartBtn').addEventListener('click', restart);
+        document.getElementById('restartBtn2').addEventListener('click', restart);
+        
+        document.querySelectorAll('.skinOption').forEach(option => {
+            option.addEventListener('click', function() {
+                player.color = this.dataset.color;
+            });
+        });
+        
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        gameLoop();
+    </script>
+</body>
+</html>
+```
+
